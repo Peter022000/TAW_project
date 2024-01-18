@@ -12,11 +12,15 @@ import com.example.DishQR_api.repository.QrCodeRepository;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,21 +34,41 @@ public class OrderService {
     private final CartOrderMapper cartOrderMapper;
     private final AcceptedOrderMapper acceptedOrderMapper;
     private final UserService userService;
+    private SimpMessagingTemplate messagingTemplate;
 
-    public List<CartOrderDto> getOrdersByStatus(StatusType status) {
+    public ResponseEntity<?> setPayed(AcceptedOrderDto acceptedOrderDto) {
+        Order order = acceptedOrderMapper.toEntity(acceptedOrderDto);
+        order = order.toBuilder().isPayed(true).build();
+        Order savedOrder = orderRepository.save(order);
+        return ResponseEntity.ok(acceptedOrderMapper.toDto(savedOrder));
+    }
+
+    public List<AcceptedOrderDto> getOrdersByStatus(StatusType status) {
         List<Order> orders = orderRepository.findAllByStatus(status);
-        List<CartOrderDto> ordersDto = cartOrderMapper.toDtoList(orders);
+        List<AcceptedOrderDto> ordersDto = acceptedOrderMapper.toDtoList(orders);
+        return ordersDto;
+    }
+    public List<AcceptedOrderDto> getOrdersByStatusToday(StatusType status) {
+        LocalDate today = LocalDate.now(ZoneId.of("Europe/Warsaw"));
+        Instant startOfDay = today.atStartOfDay(ZoneId.of("Europe/Warsaw")).toInstant();
+        Instant endOfDay = today.plusDays(1).atStartOfDay(ZoneId.of("Europe/Warsaw")).toInstant();
+
+        List<Order> orders = orderRepository.findAllByStatusAndDateBetween(status, startOfDay.toEpochMilli(), endOfDay.toEpochMilli());
+        List<AcceptedOrderDto> ordersDto = acceptedOrderMapper.toDtoList(orders);
         return ordersDto;
     }
 
-    public void changeOrderStatus(String orderId, StatusType newStatus) {
+    public ResponseEntity<?> changeOrderStatus(String orderId, StatusType newStatus) {
         Optional<Order> optionalOrder = orderRepository.findById(orderId);
         if (optionalOrder.isPresent()) {
             Order order = optionalOrder.get();
             order = order.toBuilder().status(newStatus).build();
-            orderRepository.save(order);
+
+            Order savedOrder = orderRepository.save(order);
+
+            return ResponseEntity.ok(acceptedOrderMapper.toDto(savedOrder));
         } else {
-            throw new RuntimeException("Order not found with id: " + orderId);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Order not found with id: " + orderId);
         }
     }
 
@@ -121,6 +145,10 @@ public class OrderService {
 
         List<OrderItemDto> orderItems = cartOrderDto.getOrderDishesDto();
 
+        if(cartOrderDto.getOrderDishesDto().isEmpty()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Order is empty");
+        }
+
         if(!validateDishesInOrder(orderItems)){
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("One of the dishes is not valid");
         }
@@ -144,8 +172,7 @@ public class OrderService {
 
         Order order = cartOrderMapper.toEntity(cartOrderDto);
 
-        order = order.toBuilder().status(StatusType.NEW).isPayed(false).date(LocalDateTime.now()).build();
-
+        order = order.toBuilder().status(StatusType.NEW).isPayed(false).date(Instant.now().atZone(ZoneId.of("Europe/Warsaw")).toInstant().toEpochMilli()).build();
 
         if (userId != null) {
             order = order.toBuilder().userId(userId).build();
@@ -155,7 +182,11 @@ public class OrderService {
             userService.updateUserLastDiscountOrderNumber(userId, this.getNumberOfOrders()+1);
         }
 
-        return ResponseEntity.ok(orderRepository.save(order));
+        Order savedOrder = orderRepository.save(order);
+
+        messagingTemplate.convertAndSend("/topic/newOrder", acceptedOrderMapper.toDto(savedOrder));
+
+        return ResponseEntity.ok(savedOrder);
     }
 
     public boolean validateDishesInOrder(List<OrderItemDto> orderItemsDto) {
@@ -289,7 +320,7 @@ public class OrderService {
     public Double checkDiscount(Boolean isUsed, Double discountPercentage, Double cost){
 
         if(isUsed){
-            cost = cost * discountPercentage;
+            cost = cost-(cost * discountPercentage);
         }
 
         return roundToTwoDecimalPlaces(cost);
@@ -297,5 +328,9 @@ public class OrderService {
 
     public DiscountSettings getDiscountSettings(){
         return discountSettingsRepository.findAll().get(0);
+    }
+
+    public List<Order> getAllOrders() {
+        return orderRepository.findAll();
     }
 }

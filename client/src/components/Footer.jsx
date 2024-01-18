@@ -4,7 +4,7 @@ import '../App.css';
 const Footer = () => {
     return (
         <div className={"footer"}>
-            © {new Date().getFullYear()} Copyright: Piotr Duda
+            © {new Date().getFullYear()} Piotr Duda
         </div>
     )
 }

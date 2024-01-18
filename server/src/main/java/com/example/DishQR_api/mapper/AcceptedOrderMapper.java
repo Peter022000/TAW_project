@@ -1,8 +1,8 @@
 package com.example.DishQR_api.mapper;
 
 import com.example.DishQR_api.dto.AcceptedOrderDto;
-import com.example.DishQR_api.dto.CartOrderDto;
 import com.example.DishQR_api.model.Order;
+import com.example.DishQR_api.service.QrCodeService;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -14,13 +14,14 @@ import java.util.stream.Collectors;
 public class AcceptedOrderMapper {
 
     private final OrderItemMapper orderItemMapper;
-    private final OrderDiscountMapper orderDiscountMapper;
+    private final QrCodeService qrCodeService;
 
     public AcceptedOrderDto toDto(Order order) {
         return AcceptedOrderDto.builder()
                 .id(order.getId())
                 .userId(order.getUserId())
                 .tableNoId(order.getTableNoId())
+                .tableNo(qrCodeService.checkCode(order.getTableNoId()).get().getQrCode())
                 .cost(order.getCost())
                 .orderDishesDto(orderItemMapper.toDtoList(order.getOrderDishes()))
                 .paymentMethod(order.getPaymentMethod())
