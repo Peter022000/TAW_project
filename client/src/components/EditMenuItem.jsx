@@ -52,7 +52,7 @@ const EditMenuItem = (props) => {
             setName(dish.name);
             setDishType(dish.dishType);
             setPrice(dish.price);
-            setIngredients(dish.ingredients);
+            setIngredients(dish.ingredients.join(','));
 
         } catch (error) {
             console.error('Error fetching data:', error);
